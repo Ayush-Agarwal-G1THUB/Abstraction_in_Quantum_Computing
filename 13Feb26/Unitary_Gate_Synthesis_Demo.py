@@ -4,21 +4,25 @@ import copy
 
 N_QUBITS        = 2
 MAX_DEPTH       = 20
-POP_SIZE        = 2500
-NUM_GENERATIONS = 300
-DEF_MUT_RATE    = 0.1
+POP_SIZE        = 2000
+NUM_GENERATIONS = 400
+DEF_MUT_RATE    = 0.2
 DEF_MUT_BOOST_COOLDOWN = 10
-STAG_THRESH     = 20
+STAG_THRESH     = 15
 
 rng = np.random.default_rng()
 dev = qml.device('default.qubit', wires=N_QUBITS)
 
-TARGET_MATRIX = 0.5 * np.array([
-    [1,  1,  1,  1],
-    [1,  1j, -1, -1j],
-    [1, -1,  1, -1],
-    [1, -1j, -1,  1j]
-])
+
+def random_unitary(d, rng=rng):
+    Z = (rng.normal(size=(d, d)) +
+         1j * rng.normal(size=(d, d))) / np.sqrt(2)
+
+    Q, R = np.linalg.qr(Z)
+    phases = np.diag(R) / np.abs(np.diag(R))
+    return Q * phases
+
+TARGET_MATRIX = random_unitary(2**N_QUBITS)
 
 single_parametrised_gates = [qml.RX, qml.RY, qml.RZ]
 single_gates = [
@@ -204,6 +208,9 @@ def remove_global_phase(U, V):
     return U / phase
 
 def genetic_algorithm (elitism_frac=0.2) :
+    print("Target matrix :")
+    print(np.round(TARGET_MATRIX, 2)) 
+
     population, fitnesses = create_population(pop_size=POP_SIZE)
     population, fitnesses = sort_pop(population, fitnesses)
 
@@ -222,15 +229,16 @@ def genetic_algorithm (elitism_frac=0.2) :
         if fitnesses[0]==best_fitnesses[-1] : stag_count += 1
         else : 
             stag_count = 0
-            if mut_rate > DEF_MUT_RATE :
+            if (mut_rate > DEF_MUT_RATE) and (mut_boost_cooldown==0):
                 mut_rate *= 0.9
                 print("Reducing mutation rate")
+                mut_boost_cooldown = DEF_MUT_BOOST_COOLDOWN
         mut_boost_cooldown = max(mut_boost_cooldown-1, 0)
 
         if (stag_count > STAG_THRESH) and (mut_boost_cooldown==0):
             mut_rate *= 1.2
-            mut_boost_cooldown = DEF_MUT_BOOST_COOLDOWN
             print("Boosting mutation rate")
+            mut_boost_cooldown = DEF_MUT_BOOST_COOLDOWN
 
 
         best_fitnesses.append(fitnesses[0])
