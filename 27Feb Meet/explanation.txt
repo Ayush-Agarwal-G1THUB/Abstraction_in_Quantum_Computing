@@ -1,0 +1,139 @@
+
+## Code 1 — QUASH (Symbolic / Logic Approach)
+
+### What is the core idea?
+- Quantum state vectors are complex numbers like `[0.707+0j, 0.707+0j]` — impossible for a logic solver to reason about directly
+- QUASH's insight: **most quantum states you actually care about are finite and nameable**
+- So instead of complex numbers, just give each state a symbol name and reason about symbols
+
+### Step 1 — Assign Symbols to States
+```
+|0>  →  α  (qubit is definitely 0)
+|1>  →  β  (qubit is definitely 1)
+|+>  →  γ  (equal superposition, +phase)
+|->  →  δ  (equal superposition, -phase)
+anything else → ⊥ (unknown / don't care)
+```
+
+### Step 2 — Build Symbolic I/O Tables for Each Gate
+- For every gate, record what symbol goes in and what symbol comes out
+- This is built **automatically** from the gate's math, not by hand
+
+```
+H gate table:
+  α  →  γ     (H turns |0> into |+>)
+  β  →  δ     (H turns |1> into |->)
+  γ  →  α     (H turns |+> back to |0>)
+  δ  →  β     (H turns |-> back to |1>)
+  ⊥  →  ⊥     (unknown in, unknown out)
+
+X gate table:
+  α  →  β     (X flips |0> to |1>)
+  β  →  α     (X flips |1> to |0>)
+  γ  →  γ     (X leaves |+> unchanged)
+  ⊥  →  ⊥
+```
+
+### Step 3 — State the Synthesis Goal as a Constraint
+- For Grover's state preparation, the goal is: **"find a gate sequence that maps α → γ"** (i.e., takes `|0>` to `|+>`)
+- This is now a pure symbol-matching problem, no complex numbers anywhere
+
+### Step 4 — Search for the Solution (Decision Procedure)
+- The code tries all possible gate sequences of increasing length
+- **Depth 0** (no gates): α stays α, not γ → **UNSAT** (no solution)
+- **Depth 1** (one gate): try H → α becomes γ ✓ → **SAT, solution found: [H]**
+- This mimics exactly what the Z3 theorem prover does in the paper
+
+### Step 5 — Prove Optimality
+- Because it found SAT at depth 1 and UNSAT at depth 0, it **proves** that H is the minimum-cost solution
+- No shorter circuit exists — this is a guarantee, not just a guess
+
+### Step 6 — Run the Full Grover Circuit
+- Apply the synthesised H to both qubits → creates uniform superposition `|++>`
+- Apply Oracle (CZ gate) → flips the phase of the target state `|11>`
+- Apply Diffuser (H,X,CZ,X,H sequence) → amplifies the marked state
+- Measure → get `|11>` with probability **1.0**
+
+---
+
+## Code 2 — AutoQC (Neural Network Approach)
+
+### What is the core idea?
+- Instead of logic, use **machine learning**
+- Train a neural network on thousands of example circuits so it "learns" which gate tends to be useful in which situation
+- At synthesis time, let the NN guide the search by assigning a **priority score** to each gate
+
+### Step 1 — Build the Gate Library (same gates, different representation)
+- Gates are still H, X, CX, CZ etc. but now represented as full 4×4 matrices acting on 2-qubit states
+- State vectors stay as actual complex numbers (no symbols)
+
+### Step 2 — Generate Training Data Automatically
+- Create 5000 random quantum circuits by picking random gates one after another
+- From each circuit, extract training examples in this form:
+```
+"When the quantum state is [0.5, 0.5, 0.5, 0.5], 
+ the gate that was applied here was H0"
+ 
+"When the quantum state is [0.707, 0, 0.707, 0],
+ the gate that was applied here was CX01"
+```
+- End up with ~13,000 (state → gate) training pairs
+- This is the paper's key trick — **training data is free, generated automatically**
+
+### Step 3 — Neural Network Architecture
+- Input: 8 numbers (the real part + imaginary part of the 4-dim state vector)
+- Hidden layers: 4 layers of 64 neurons each, with ReLU activation
+- Output: 7 numbers (one probability per gate), softmax to sum to 1
+- This mirrors AutoQC's CvNN + Fully Connected design from the paper
+
+### Step 4 — Train with Backpropagation
+- Show the network each training pair
+- If it predicted the wrong gate, nudge the weights to do better next time
+- After 40 epochs the network learns rough patterns like:
+  - "superposition states often need H gates"
+  - "basis states often need CX gates"
+
+### Step 5 — Backward Synthesis (the clever part)
+- Instead of searching forward from `|00>`, **start from the target state and work backwards**
+- Why backwards? Because you know exactly what the target looks like but not the starting sequence
+```
+Start:  target state |++> = [0.5, 0.5, 0.5, 0.5]
+Step 1: NN says H1 has highest probability → apply H1 inverse → state becomes [0.5, 0.5, 0.5, 0.5] ... 
+Step 2: NN says H0 has highest probability → apply H0 inverse → state becomes [1, 0, 0, 0] = |00> ✓
+```
+- Once you reach a simple basis state `|00>`, stop
+- **Reverse the sequence** → forward circuit is `[H0, H1]`
+
+### Step 6 — Stochastic Search
+- The NN doesn't always pick the best gate — it **samples randomly based on probabilities**
+- If one attempt fails (never reaches a basis state in 8 steps), just try again
+- Out of 300 attempts, at least one will succeed
+- This is much faster than pure random search because the NN eliminates most bad choices
+
+### Step 7 — Run Grover Same as Before
+- Apply synthesised prep sequence to `|00>` → `|++>`
+- Oracle + Diffuser → amplify `|11>`
+- Result: `|11>` with probability **1.0**
+
+---
+
+## Side-by-Side Comparison
+
+| | **QUASH — Code 1** | **AutoQC — Code 2** |
+|---|---|---|
+| **Represents states as** | Symbols (α, β, γ…) | Complex number vectors |
+| **Searches by** | Trying all symbol chains | NN-guided random sampling |
+| **Decides using** | SAT/UNSAT logic | Probability scores |
+| **Training needed?** | No | Yes (40 epochs) |
+| **Can prove optimality?** | Yes — depth 0 UNSAT proves H is minimum | No — just finds *a* solution |
+| **Scales to big circuits?** | No — symbol explosion | Better — NN generalises |
+| **Result for Grover prep** | `[H]` (1 gate per qubit) | `[H0, H1]` (equivalent) |
+| **Final Grover answer** | `\|11>` prob = 1.0 ✓ | `\|11>` prob = 1.0 ✓ |
+
+---
+
+## The One-Line Summary of Each
+
+**QUASH:** *"I will replace messy quantum math with simple symbols and use pure logic to prove what circuit must exist."*
+
+**AutoQC:** *"I will learn from thousands of random circuits and use that knowledge to intelligently guess my way to the right circuit."*
