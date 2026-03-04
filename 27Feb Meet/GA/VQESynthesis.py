@@ -37,26 +37,46 @@ class VQETask(SynthesisTask):
         print(f"VQE Result for {self.n_qubits} Qubits")
         print(qml.draw(self.qnode)(best_structure))
 
-def create_Hamiltonian (n_qubits=3) :
+def create_Hamiltonian(n_qubits=4, connectivity_prob=0.6):
     coeffs = []
     obs = []
-    J = 1.0  # Coupling constant
 
-    for i in range(n_qubits - 1):
-        # X-X coupling
-        coeffs.append(J)
-        obs.append(qml.PauliX(i) @ qml.PauliX(i+1))
-        
-        # Y-Y coupling
-        coeffs.append(J)
-        obs.append(qml.PauliY(i) @ qml.PauliY(i+1))
-        
-        # Z-Z coupling
-        coeffs.append(J)
-        obs.append(qml.PauliZ(i) @ qml.PauliZ(i+1))
+    # --- Random pairwise interactions ---
+    for i in range(n_qubits):
+        for j in range(i+1, n_qubits):
 
-    H = qml.Hamiltonian(coeffs, obs)
-    return H
+            if np.random.rand() < connectivity_prob:
+
+                Jx = np.random.uniform(-1, 1)
+                Jy = np.random.uniform(-1, 1)
+                Jz = np.random.uniform(-1, 1)
+
+                coeffs.append(Jx)
+                obs.append(qml.PauliX(i) @ qml.PauliX(j))
+
+                coeffs.append(Jy)
+                obs.append(qml.PauliY(i) @ qml.PauliY(j))
+
+                coeffs.append(Jz)
+                obs.append(qml.PauliZ(i) @ qml.PauliZ(j))
+
+    # --- Random local fields ---
+    for i in range(n_qubits):
+
+        hx = np.random.uniform(-1, 1)
+        hy = np.random.uniform(-1, 1)
+        hz = np.random.uniform(-1, 1)
+
+        coeffs.append(hx)
+        obs.append(qml.PauliX(i))
+
+        coeffs.append(hy)
+        obs.append(qml.PauliY(i))
+
+        coeffs.append(hz)
+        obs.append(qml.PauliZ(i))
+
+    return qml.Hamiltonian(coeffs, obs)
 
 def ground_state_energy(H):
     H_mat = np.array(qml.matrix(H))
@@ -64,7 +84,7 @@ def ground_state_energy(H):
     return np.min(eigenvalues)
 
 if __name__ == "__main__":
-    H = create_Hamiltonian(4)
+    H = create_Hamiltonian(n_qubits=4)
     print(H)
     print("True ground energy = ", ground_state_energy(H))
     task = VQETask(H)
