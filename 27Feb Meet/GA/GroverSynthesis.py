@@ -9,7 +9,7 @@ single_gates = [
         qml.PauliX, qml.PauliY, qml.PauliZ, 
         qml.S, qml.T
     ]
-multi_gates = [qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX]
+multi_gates = [qml.CNOT, qml.CZ]
 gates = [single_gates, single_parametrised_gates, multi_gates]
 
 class GroverTask(SynthesisTask):
@@ -24,7 +24,8 @@ class GroverTask(SynthesisTask):
         def _circuit(structure):
             for i in range(self.n_qubits): qml.Hadamard(wires=i)
             
-            for _ in range(int(math.sqrt(self.n_qubits))):
+            num_iters = int(math.pi/4 * self.n_qubits)
+            for _ in range(num_iters):
                 # Oracle
                 qml.FlipSign(self.target_idx, wires=range(self.n_qubits))
                 # Diffuser
