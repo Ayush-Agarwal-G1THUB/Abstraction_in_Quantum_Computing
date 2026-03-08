@@ -7,9 +7,12 @@ n_qubits_range = range(5, 10)
 all_results = []
 
 for n_qubits in n_qubits_range:
+    threshold_met = False
+
     H = create_Hamiltonian(n_qubits=n_qubits)
     dev = qml.device("default.qubit", wires=n_qubits)
     true_ground_energy = float(ground_state_energy(H))
+    print(f"True ground energy = {true_ground_energy}")
 
     @qml.qnode(dev)
     def ansatz_qnode(params):
@@ -17,6 +20,8 @@ for n_qubits in n_qubits_range:
         return qml.expval(H)
 
     for n_layers in range(1, 100, 5):
+        if threshold_met : break
+
         print(f"\nQubits: {n_qubits} | Layers: {n_layers}")
         
         # Initialize params (0 to 2*pi is better for rotations)
@@ -26,14 +31,17 @@ for n_qubits in n_qubits_range:
         opt = qml.AdamOptimizer(stepsize=0.1)
         energy_history = []
 
-        for i in range(1000):
+        max_steps = 1000
+
+        for i in range(max_steps):
             params, energy = opt.step_and_cost(ansatz_qnode, params)
             energy_history.append(float(energy))
             
-            if i % 100 == 0:
+            if i % 200 == 0 or i==max_steps-1:
                 print(f"  Step {i}: Energy = {energy:.6f}")
 
         fitness = energy / true_ground_energy # type: ignore
+        print(f"Fitness = {fitness}")
         
         # Store metadata for visualization
         all_results.append({
@@ -44,6 +52,10 @@ for n_qubits in n_qubits_range:
             "fitness": float(fitness),
             "history": energy_history
         })
+
+        if fitness > 0.995 :
+            threshold_met = True
+            break
 
 # Save to JSON for the visualization script
 with open("vqe_results.json", "w") as f:
