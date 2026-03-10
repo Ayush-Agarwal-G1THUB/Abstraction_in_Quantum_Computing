@@ -12,6 +12,8 @@ for n_qubits in n_qubits_range:
     H = create_Hamiltonian(n_qubits=n_qubits)
     dev = qml.device("default.qubit", wires=n_qubits)
     true_ground_energy = float(ground_state_energy(H))
+
+    print(f"\nNUM QUBITS = {n_qubits}")
     print(f"True ground energy = {true_ground_energy}")
 
     @qml.qnode(dev)
@@ -19,7 +21,7 @@ for n_qubits in n_qubits_range:
         qml.StronglyEntanglingLayers(weights=params, wires=range(n_qubits))
         return qml.expval(H)
 
-    for n_layers in range(1, 100, 5):
+    for n_layers in range(2, 50, 7):
         if threshold_met : break
 
         print(f"\nQubits: {n_qubits} | Layers: {n_layers}")
@@ -39,6 +41,10 @@ for n_qubits in n_qubits_range:
             
             if i % 200 == 0 or i==max_steps-1:
                 print(f"  Step {i}: Energy = {energy:.6f}")
+
+            if energy/true_ground_energy > 0.995 :
+                pass
+                break
 
         fitness = energy / true_ground_energy # type: ignore
         print(f"Fitness = {fitness}")

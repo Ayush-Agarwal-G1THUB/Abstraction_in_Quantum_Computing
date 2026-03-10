@@ -1,9 +1,19 @@
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
+import os
 
-# Load the data
-with open("vqe_results.json", "r") as f:
+if len(sys.argv) < 2:
+    filename = "vqe_results.json"
+else : 
+    filename = sys.argv[1]
+
+if not os.path.exists(filename):
+    print(f"Error: File '{filename}' not found.")
+    sys.exit(1)
+
+with open(filename, "r") as f:
     data = json.load(f)
 
 # Get unique qubit counts present in the results
