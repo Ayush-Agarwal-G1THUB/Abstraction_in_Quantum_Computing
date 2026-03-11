@@ -1,11 +1,12 @@
 import numpy as np
 import pennylane as qml  # type: ignore
 import copy
-from abc import ABC, abstractmethod
+from core import create_Hamiltonian, ground_state_energy
+import json
 
-# --- GA PARAMETERS ---
+# --- DEFAULT GA PARAMETERS ---
 MAX_DEPTH = 30
-POP_SIZE = 2000
+POP_SIZE = 200
 NUM_GENERATIONS = 50
 DEF_MUT_RATE = 0.3
 DEF_MUT_BOOST_COOLDOWN = 10
@@ -16,90 +17,31 @@ ROULETTE = "roulette"
 
 rng = np.random.default_rng()
 
+# --- ALLOWED GATES ---
+single_parametrised_gates = [] #type: ignore
+single_gates = [
+        qml.Hadamard, 
+        qml.PauliX, qml.PauliY, qml.PauliZ, 
+        qml.S, qml.T
+    ]
+multi_gates = [qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX]
 
-# ==========================================
-# TASK INTERFACE
-# ==========================================
-class SynthesisTask(ABC):
-    """
-    Abstract base class for any quantum synthesis problem.
-    The GA will only interact with this interface.
-    """
-
-    def __init__(self, n_qubits, gates):
-        self.n_qubits = n_qubits
-        self.gates = gates
-
-    @abstractmethod
-    def evaluate(self, structure) -> float:
-        pass
-
-    @abstractmethod
-    def print_result(self, best_structure):
-        pass
-
-
-# ==========================================
-# UNITARY DECOMPOSITION
-# ==========================================
-class UnitaryDecompositionTask(SynthesisTask):
-    """
-    Specific implementation for synthesizing a circuit that matches a Target Unitary Matrix.
-    """
-
-    def __init__(self, target_matrix, n_qubits, gates):
-        self.target = target_matrix
-        self.n_qubits = n_qubits
-        self.gates = gates
-        self.dev = qml.device("default.qubit", wires=n_qubits)
-
-        single_gates = gates[0]
-        single_parametrised_gates = gates[1]
-        multi_gates = gates[2]
-
-        # We define the exec_circuit QNode inside the task so it binds to the task's device
-        @qml.qnode(self.dev)
-        def _exec_circuit(structure):
-            for gate, wires, theta in structure:
-                if gate in single_parametrised_gates:
-                    gate(theta, wires=wires)
-                else:
-                    gate(wires=wires)
-            return qml.state()
-
-        self.exec_circuit = _exec_circuit
-
-    def evaluate(self, structure) -> float:
-        # Get matrix and calculate overlap
-        U = np.array(qml.matrix(self.exec_circuit)(structure))  # type: ignore
-        V = self.target
-        d = U.shape[0]
-        overlap = np.trace(V.conj().T @ U)
-
-        # Calculate raw fidelity
-        fidelity = np.abs(overlap / d) ** 2
-        return fidelity
-
-    def remove_global_phase(self, U):
-        overlap = np.trace(self.target.conj().T @ U)
-        phase = overlap / np.abs(overlap)  # unit complex number
-        return U / phase
-
-    def print_result(self, best_structure):
-        U = qml.matrix(self.exec_circuit)(best_structure)  # type: ignore
-        U_fixed = self.remove_global_phase(U)
-
-        print("Best matrix :")
-        print(np.round(U_fixed, 2))
-        print("\nTarget matrix :")
-        print(np.round(self.target, 2))
-        print("\nSynthesized Circuit:")
-        print(qml.draw(self.exec_circuit)(best_structure))
-
+gates = [single_gates, single_parametrised_gates, multi_gates]
 
 # ==========================================
 # GENETIC ALGORITHM
 # ==========================================
+
+def evaluate(structure):
+    energy = float(qnode(structure))
+    return -energy - (len(structure) * 0.005)
+
+def print_result(structure):
+    print()
+    print(f"Circuit diagram:")
+    print(qml.draw(qnode)(structure))
+
+
 def gen_circuit_structure (n_qubits, gates, max_depth, single_gate_pref=0.5):
     depth = rng.choice(range(1, max_depth + 1))
 
@@ -134,13 +76,13 @@ def gen_circuit_structure (n_qubits, gates, max_depth, single_gate_pref=0.5):
     return structure
 
 
-def create_population(pop_size, max_depth, task):
+def create_population(pop_size, max_depth, n_qubits, gates):
     population = []
     fitnesses = []
     for _ in range(pop_size):
-        structure = gen_circuit_structure(task.n_qubits, task.gates, max_depth)
+        structure = gen_circuit_structure(n_qubits, gates, max_depth)
         population.append(structure)
-        fitness = task.evaluate(structure)
+        fitness = evaluate(structure)
         fitnesses.append(fitness)
     return population, fitnesses
 
@@ -224,16 +166,16 @@ def mutate(ind, n_qubits, gates, max_depth, mutation_rate):
     return ind
 
 
-def eval_pop(population, task):
+def eval_pop(population):
     fitnesses = []
     for ind in population:
-        # Abstract evaluation
-        fitnesses.append(task.evaluate(ind))
+        fitnesses.append(evaluate(ind))
     return fitnesses
 
 
 def genetic_algorithm(
-        task: SynthesisTask,
+        n_qubits,
+        gates,
         n_results:int,
         max_depth=MAX_DEPTH,
         pop_size = POP_SIZE,
@@ -245,9 +187,7 @@ def genetic_algorithm(
         stag_thresh = STAG_THRESH,
         elitism_frac=0.2
     ):
-    N_QUBITS = task.n_qubits
-    gates = task.gates
-    population, fitnesses = create_population(max_depth, pop_size, task)
+    population, fitnesses = create_population(max_depth, pop_size, n_qubits, gates)
     population, fitnesses = sort_pop(population, fitnesses)
 
     best_fitnesses = [0]
@@ -256,7 +196,7 @@ def genetic_algorithm(
 
     while generation < num_generations:
         if generation % 10 == 0:
-            print(f"Generation   {generation} | Best fitness: {fitnesses[0]:.6f}")
+            print(f"  Generation {generation:2} | Best fitness = {fitnesses[0]:.6f}")
 
         if fitnesses[0] == best_fitnesses[-1]:
             stag_count += 1
@@ -281,56 +221,79 @@ def genetic_algorithm(
         for _ in range(int((pop_size - num_elites) / 2)):
             parent1, parent2 = select_parents(population, fitnesses, TOURNAMENT)  # type: ignore
             child1, child2 = crossover(parent1, parent2)
-            children.append(mutate(child1, N_QUBITS, gates, max_depth, mut_rate))
-            children.append(mutate(child2, N_QUBITS, gates, max_depth, mut_rate))
+            children.append(mutate(child1, n_qubits, gates, max_depth, mut_rate))
+            children.append(mutate(child2, n_qubits, gates, max_depth, mut_rate))
 
         population = children
-        fitnesses = eval_pop(population, task)  # Pass task here
+        fitnesses = eval_pop(population)  # Pass task here
         population, fitnesses = sort_pop(population, fitnesses)
         generation += 1
 
     population, fitnesses = sort_pop(population, fitnesses)
+    
+    best_fitness = -100 * fitnesses[0] / true_ground_energy
+    print(f"Best fitness: {best_fitness:.2f}%")
 
-    print(f"\n{generation} generations completed")
-    print(f"Final Best fitness value: {fitnesses[0]:.6f}")
+    # print_result(population[0])
 
-    task.print_result(population[0])
+    return population[:n_results], fitnesses[:n_results], best_fitnesses
 
-    return population[:n_results]
 
 
 # ==========================================
 # EXECUTION
 # ==========================================
-if __name__ == "__main__":
 
-    def random_unitary(d):
-        Z = (rng.normal(size=(d, d)) + 1j * rng.normal(size=(d, d))) / np.sqrt(2)
-        Q, R = np.linalg.qr(Z)
-        phases = np.diag(R) / np.abs(np.diag(R))
-        return Q * phases
+n_qubits_range = range(5, 10)
+all_results = [] # type: ignore
 
-    N_QUBITS = 2
-    print("--- Starting Unitary Decomposition Task ---")
-    my_target = random_unitary(2**N_QUBITS)
+for n_qubits in n_qubits_range :
+    H = create_Hamiltonian(n_qubits=n_qubits)
+    dev = qml.device("default.qubit", wires=n_qubits)
+    true_ground_energy = float(ground_state_energy(H))
 
-    default_gate_set = [
-        [  # single gates
-            qml.Hadamard,
-            qml.PauliX,
-            qml.PauliY,
-            qml.PauliZ,
-            qml.S,
-            qml.T,
-            [qml.RX, qml.RY, qml.RZ],
-        ],
-        [qml.RX, qml.RY, qml.RZ],  # single paramtrised gates
-        [qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX],  # multi gates
-    ]
+    dev = qml.device('default.qubit', wires=n_qubits)
+    @qml.qnode(dev)
+    def _circuit(structure):
+        for gate, wires, theta in structure:
+            target_wires = wires if isinstance(wires, list) else int(wires)
+            if gate in single_parametrised_gates:
+                gate(theta, wires=target_wires)
+            else: gate(wires=target_wires)
+        return qml.expval(H)
+    qnode = _circuit
 
-    # Instantiate the specific task
-    my_task = UnitaryDecompositionTask(
-        target_matrix=my_target, n_qubits=N_QUBITS, gates=default_gate_set
-    )
-    # Run the synthesizer
-    genetic_algorithm(n_results=1, task=my_task)
+    print("==============================================")
+    print(f"NUM QUBITS = {n_qubits}")
+    print(f"True ground energy = {true_ground_energy}")
+
+    max_depth_range = range(20, 50, 10)
+
+    for max_depth in max_depth_range :
+
+        num_generations_range = range(50, 60, 10)
+
+        for num_generations in num_generations_range :
+            print(f"\nQubits: {n_qubits} | Max depth: {max_depth}")
+
+            results, fitnesses, energy_history = genetic_algorithm (
+                n_qubits=n_qubits,
+                gates = gates,
+                n_results=1,
+                max_depth=max_depth,
+                num_generations=num_generations
+            )
+
+            all_results.append({
+                "n_qubits": n_qubits,
+                "max_depth": max_depth,
+                "num_generations": num_generations,
+                "final_energy": energy_history[0],
+                "true_energy": true_ground_energy,
+                "history": energy_history
+            })
+
+    print()
+
+with open("pure_ga_results.json", "w") as f:
+    json.dump(all_results, f, indent=4)

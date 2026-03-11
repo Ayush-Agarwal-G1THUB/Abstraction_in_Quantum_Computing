@@ -1,7 +1,7 @@
 import json
 import pennylane as qml #type: ignore
 from pennylane import numpy as pnp
-from vqe_core import create_Hamiltonian, ground_state_energy
+from core import create_Hamiltonian, ground_state_energy
 
 n_qubits_range = range(5, 10)
 all_results = []
@@ -13,7 +13,8 @@ for n_qubits in n_qubits_range:
     dev = qml.device("default.qubit", wires=n_qubits)
     true_ground_energy = float(ground_state_energy(H))
 
-    print(f"\nNUM QUBITS = {n_qubits}")
+    print("==============================================")
+    print(f"NUM QUBITS = {n_qubits}")
     print(f"True ground energy = {true_ground_energy}")
 
     @qml.qnode(dev)
@@ -35,12 +36,12 @@ for n_qubits in n_qubits_range:
 
         max_steps = 1000
 
-        for i in range(max_steps):
+        for step in range(max_steps):
             params, energy = opt.step_and_cost(ansatz_qnode, params)
             energy_history.append(float(energy))
             
-            if i % 200 == 0 or i==max_steps-1:
-                print(f"  Step {i}: Energy = {energy:.6f}")
+            if step % 200 == 0 or step==max_steps-1:
+                print(f"  Step {step:3}: Energy = {energy:.6f}")
 
             if energy/true_ground_energy > 0.995 :
                 pass
@@ -63,6 +64,8 @@ for n_qubits in n_qubits_range:
             threshold_met = True
             break
 
+    print()
+
 # Save to JSON for the visualization script
-with open("vqe_results.json", "w") as f:
+with open("pure_vqe_results.json", "w") as f:
     json.dump(all_results, f, indent=4)
