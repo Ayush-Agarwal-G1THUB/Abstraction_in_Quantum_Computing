@@ -6,8 +6,8 @@ import json
 
 # --- DEFAULT GA PARAMETERS ---
 MAX_DEPTH = 30
-POP_SIZE = 200
-NUM_GENERATIONS = 50
+POP_SIZE = 1000
+NUM_GENERATIONS = 100
 DEF_MUT_RATE = 0.3
 DEF_MUT_BOOST_COOLDOWN = 10
 STAG_THRESH = 15
@@ -35,6 +35,7 @@ gates = [single_gates, single_parametrised_gates, multi_gates]
 def evaluate(structure):
     energy = float(qnode(structure))
     return -energy - (len(structure) * 0.005)
+
 
 def print_result(structure):
     print()
@@ -244,7 +245,7 @@ def genetic_algorithm(
 # EXECUTION
 # ==========================================
 
-n_qubits_range = range(5, 10)
+n_qubits_range = range(5, 7)
 all_results = [] # type: ignore
 
 for n_qubits in n_qubits_range :
@@ -267,31 +268,28 @@ for n_qubits in n_qubits_range :
     print(f"NUM QUBITS = {n_qubits}")
     print(f"True ground energy = {true_ground_energy}")
 
-    max_depth_range = range(20, 50, 10)
+    max_depth_range = range(20, 40, 10)
 
     for max_depth in max_depth_range :
 
-        num_generations_range = range(50, 60, 10)
+        num_generations =100
+        print(f"\nQubits: {n_qubits} | Max depth: {max_depth}")
 
-        for num_generations in num_generations_range :
-            print(f"\nQubits: {n_qubits} | Max depth: {max_depth}")
+        results, fitnesses, energy_history = genetic_algorithm (
+            n_qubits=n_qubits,
+            gates = gates,
+            n_results=1,
+            max_depth=max_depth,
+            num_generations=num_generations
+        )
 
-            results, fitnesses, energy_history = genetic_algorithm (
-                n_qubits=n_qubits,
-                gates = gates,
-                n_results=1,
-                max_depth=max_depth,
-                num_generations=num_generations
-            )
-
-            all_results.append({
-                "n_qubits": n_qubits,
-                "max_depth": max_depth,
-                "num_generations": num_generations,
-                "final_energy": energy_history[0],
-                "true_energy": true_ground_energy,
-                "history": energy_history
-            })
+        all_results.append({
+            "n_qubits": n_qubits,
+            "max_depth": max_depth,
+            "final_energy": energy_history[0],
+            "true_energy": true_ground_energy,
+            "history": energy_history
+        })
 
     print()
 
