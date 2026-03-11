@@ -295,5 +295,5 @@ for n_qubits in n_qubits_range :
 
     print()
 
-with open("pure_ga_results.json", "w") as f:
+with open("ga_results.json", "w") as f:
     json.dump(all_results, f, indent=4)
